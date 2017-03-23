@@ -112,32 +112,45 @@ if __name__=="__main__":
     ll, mm = np.meshgrid(l, m)
     lmn, ncoord = make_lmn_vec(l, m, Npix)
     lm = lmn[:,0:2].T
+
     print lmn.shape
+
+    # Print Nyquist criteria
+    deltapix = l[1] - l[0]
+    umax = uvw[:,0].max()
+    umin = uvw[:,0].min()
+    vmax = uvw[:,1].max()
+    vmin = uvw[:,1].min()
+
+    print "min delta pix should be ", 1.0/(2*np.maximum(umax,vmax)), " whereas you are at ", deltapix
+    print "Ndeltapix should be more than", 1/np.minimum(umin,vmin), " whereas you are at", deltapix*Npix
 
     # Set number of basis funcs
     Nbasis = 15
-    
-    # Compute the matrix that maps coefficients to visibilities
-    Iint = np.zeros([Nrows, Nbasis**2], dtype=np.complex)
-    H = np.zeros([Npix**2, Nbasis**2])
-    print "Computing coeffs to vis operator mapping"
-    for k in xrange(Nrows):
-        K = np.exp(-2.0j*np.pi*np.dot(uvw[k,:],lmn.T)/ref_lambda)/np.sqrt(Nrows)
-        if k % 1000 == 0:
-            print k*100/Nrows, "percent done"
-        for i in xrange(Nbasis):
-            for j in xrange(Nbasis):
-                H[:, i * Nbasis + j] = basis_func(lmn[:, 0], lmn[:, 1], i + 1, j + 1, L)/ncoord
-                Iint[k, i * Nbasis + j] = np.dot(K, H[:, i * Nbasis + j])
 
-    # Show matrix rank and conditioning number
-    print "rank = ", np.linalg.matrix_rank(Iint)
-    print "cond = ", np.linalg.cond(Iint)
+    # # Compute the matrix that maps coefficients to visibilities
+    # Iint = np.zeros([Nrows, Nbasis**2], dtype=np.complex)
+    # H = np.zeros([Npix**2, Nbasis**2])
+    # print "Computing coeffs to vis operator mapping"
+    # for k in xrange(Nrows):
+    #     K = np.exp(-2.0j*np.pi*np.dot(uvw[k,:],lmn.T)/ref_lambda)/np.sqrt(Nrows)
+    #     if k % 1000 == 0:
+    #         print k*100/Nrows, "percent done"
+    #     for i in xrange(Nbasis):
+    #         for j in xrange(Nbasis):
+    #             H[:, i * Nbasis + j] = basis_func(lmn[:, 0], lmn[:, 1], i + 1, j + 1, L)/ncoord
+    #             Iint[k, i * Nbasis + j] = np.dot(K, H[:, i * Nbasis + j])
+    #
+    # # Show matrix rank and conditioning number
+    # print "rank = ", np.linalg.matrix_rank(Iint)
+    # print "cond = ", np.linalg.cond(Iint)
+    #
+    # # Save Iint to file so we don't have to recompute it every time
+    # print "Saving"
+    # np.savez('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz', Iint=Iint)
 
-    # Save Iint to file so we don't have to recompute it every time
-    print "Saving"
-    np.savez('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz', Iint=Iint)
-    
+    Iint = np.load('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz')["Iint"]
+
     # # Get the dirty image and PSF
     # Idflat = np.zeros(Npix**2)
     # PSFflat = np.zeros(Npix**2)
@@ -163,59 +176,60 @@ if __name__=="__main__":
     # plt.imshow(PSFflat.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
     # plt.colorbar()
     # plt.savefig("/home/landman/Projects/My_Imagers/figures/PSF_real" + str(Npix) + ".png", dpi=250)
-
+    #
     # np.savez("ID_and_PSF_" + str(Npix) + "pix.npz", ID=Idflat.reshape(Npix,Npix), PSF=PSFflat.reshape(Npix,Npix), PSFmax=PSFmax)
 
-    # holder = np.load("ID_and_PSF_" + str(Npix) + "pix.npz")
-    # PSF = holder["PSF"]
-    # #PSF = PSFflat.reshape(Npix, Npix)
-    # PSFflat = PSF.flatten()
-    # ID = holder["ID"]
-    # Idflat = ID.flatten()
-    # PSFmax = holder["PSFmax"]
-    #
-    # print "PSFmax = ", PSFmax
-    #
+    holder = np.load("ID_and_PSF_" + str(Npix) + "pix.npz")
+    PSFmax = holder["PSFmax"]
+    PSF = holder["PSF"]*PSFmax
+    #PSF = PSFflat.reshape(Npix, Npix)
+    PSFflat = PSF.flatten()
+    ID = holder["ID"]*PSFmax
+    Idflat = ID.flatten()
+
+
+    #print "PSFmax = ", PSFmax
+
     # PSFarea1 = simps(PSF, m)
     # PSFarea2 = simps(PSFarea1, l)
     #
     # PSFnorm = PSF/PSFarea2
     #
     # test = simps(simps(PSFnorm, l), m)
-    #
-    # PSFsum = np.sum(PSFflat)
-    #
-    # print PSFsum
-    #
-    # # Do the GPR
-    # GPR = GP(lm, lm, L, Nbasis, 2)
-    #
-    # print "Convolving basis funcs"
-    # #GPR.RR_convolve_basis(PSFflat.reshape(Npix, Npix), ll, mm, L)
-    # GPR.RR_convolve_basis(PSF/PSFsum, ll, mm, L)
-    #
-    # theta = np.array([0.01, 0.1*L, 1.0])
-    #
-    # print "training GP"
-    # coeffs, theta = GPR.RR_EvalGP_conv(theta, Idflat)
-    #
-    # print "Done"
-    #
-    # #Icoeffs = np.argwhere(coeffs < 1e-3)
-    # #coeffs2 = coeffs
-    # #coeffs2[Icoeffs] = 0.0
-    #
-    # #print coeffs2.size
-    #
-    # print theta
-    #
-    # IdGP = GPR.RR_From_Coeffs(coeffs)
-    #
-    # #Iltz = np.argwhere(IdGP < 0.1*IdGP.max()).squeeze()
-    # #IdGP[Iltz] = 0.0
-    #
-    # fcovcoeffs = GPR.RR_covf_conv(theta, return_covf=False)
-    #
+
+    #PSFsum = np.sum(PSFflat)
+
+    #print "PSF sum = ", PSFsum
+
+    # Do the GPR
+    GPR = GP(lm, lm, L, Nbasis, 2)
+
+    print "Convolving basis funcs"
+    #GPR.RR_convolve_basis(PSFflat.reshape(Npix, Npix), ll, mm, L)
+    GPR.RR_convolve_basis(PSF, ll, mm, L)
+
+    theta = np.array([0.01, 0.1*L, 1.0])
+
+    print "training GP"
+    coeffs, theta = GPR.RR_EvalGP_conv(theta, Idflat)
+
+    print "Done"
+
+    #Icoeffs = np.argwhere(coeffs < 1e-3)
+    #coeffs2 = coeffs
+    #coeffs2[Icoeffs] = 0.0
+
+    #print coeffs2.size
+
+    print theta
+
+    IdGP = GPR.RR_From_Coeffs(coeffs)
+
+    #Iltz = np.argwhere(IdGP < 0.1*IdGP.max()).squeeze()
+    #IdGP[Iltz] = 0.0
+
+    fcovcoeffs = GPR.RR_covf_conv(theta, return_covf=False)
+
     # # Draw a sample
     # coeffssamp = np.random.multivariate_normal(coeffs, fcovcoeffs)
     #
@@ -227,9 +241,34 @@ if __name__=="__main__":
     # plt.colorbar()
     # plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_GP_samp" + str(Npix) + ".png", dpi=250)
     #
-    # # Plot result
-    # plt.figure('Id3')
-    # plt.imshow(IdGP.reshape(Npix,Npix), interpolation="nearest", cmap="cubehelix")
-    # plt.colorbar()
-    # plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_GP" + str(Npix) + ".png", dpi=250)
+    # Plot result
+    plt.figure('IdGP')
+    plt.imshow(IdGP.reshape(Npix,Npix), interpolation="nearest", cmap="cubehelix")
+    plt.colorbar()
+    plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_GP" + str(Npix) + ".png", dpi=250)
 
+
+    # Map Coeffs to visibilities
+    Vpred = np.dot(Iint, coeffs)
+
+    # get the Chi2
+    Vdiff = Vobs - Vpred
+    Chi2real = np.sum(Vdiff.real**2)
+    Chi2imag = np.sum(Vdiff.imag**2)
+
+    print "Chi2 = ", Chi2imag + Chi2real
+
+    # Produce dirty image with these visibilities
+    Idpred = np.zeros(Npix**2)
+    for n in xrange(Npix**2):
+        Kinv = np.exp(2.0j*np.pi*np.dot(lmn[n, :], uvw.T))/np.sqrt(Nrows)
+        Idpred[n] = np.dot(Kinv, Vpred).real
+        if n%250 == 0:
+            print "n = ", n
+
+    # Plot result
+    #Idpred /= PSFmax
+    plt.figure('Idpred')
+    plt.imshow(Idpred.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
+    plt.colorbar()
+    plt.savefig("/home/landman/Projects/My_Imagers/figures/ID_pred" + str(Npix) + ".png", dpi=250)
