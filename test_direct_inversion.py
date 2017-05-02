@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Created on Mon Feb  6 16:15:22 2017
@@ -18,6 +19,7 @@ from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+import PyPolyChord as PolyChord
 
 def diag_dot(A,B):
     """
@@ -52,7 +54,16 @@ def make_lmn_vec(l,m,Npix):
            lmn[i*Npix + j,1] = m[j]
            lmn[i*Npix + j,2] = ncoord[i*Npix+j] - 1.0 
     return lmn, ncoord
-    
+
+
+def twoD_Gaussian(x, y, amplitude, xo, yo, sigma_x, sigma_y, theta):
+    xo = float(xo)
+    yo = float(yo)
+    a = (np.cos(theta) ** 2) / (2 * sigma_x ** 2) + (np.sin(theta) ** 2) / (2 * sigma_y ** 2)
+    b = -(np.sin(2 * theta)) / (4 * sigma_x ** 2) + (np.sin(2 * theta)) / (4 * sigma_y ** 2)
+    c = (np.sin(theta) ** 2) / (2 * sigma_x ** 2) + (np.cos(theta) ** 2) / (2 * sigma_y ** 2)
+    return amplitude * np.exp(- (a * ((x - xo) ** 2) + 2 * b * (x - xo) * (y - yo) + c * ((y - yo) ** 2)))
+
 if __name__=="__main__":
     # Load in some data
     ms = tbl("/home/landman/Projects/algorithm_notebooks/DATA/mfs_sky.MS_p0/")
@@ -78,7 +89,10 @@ if __name__=="__main__":
 
     Nrows = uvw.shape[0]
 
-    Freqs = msfreq.getcol("CHAN_FREQ").squeeze()[0]
+    Freqs = msfreq.getcol("CHAN_FREQ").squeeze()
+    #print Freqs
+    Freqs = Freqs[0]
+
     nchan = Freqs.size
     ref_freq = Freqs
 
@@ -89,6 +103,9 @@ if __name__=="__main__":
 
     #Get wavelengths
     ref_lambda = c / Freqs
+    print "ref lambda = ", ref_lambda
+
+
 
     #Instantiate the gridder
     #Get V corresponding to stokes I
@@ -104,8 +121,8 @@ if __name__=="__main__":
     # ra,dec = give_ra_dec(ra0,dec0,delta_pix,Npix)
     # l,m = radec_to_lm(ra,dec)
     # Set max length
-    Npix = 129  # note using odd number otherwise centre of PSF is not well defined
-    L = 0.015
+    Npix = 257  # note using odd number otherwise centre of PSF is not well defined
+    L = 0.003
 
     l = np.linspace(-L,L,Npix)
     m = np.linspace(-L,L,Npix)
@@ -115,80 +132,107 @@ if __name__=="__main__":
 
     print lmn.shape
 
+    # Get and plot true model image
+    IM = np.zeros([Npix, Npix])
+    sigma_x = 0.025 * np.pi / (180.0)  # Convert to radians (the factor of 2 is to match the tigger parametrisation)
+    sigma_y = 0.025 * np.pi / (180.0)
+    x0 = -0.05 * np.pi / (180.0)
+    y0 = -0.05 * np.pi / (180.0)
+    theta = 0.0
+    IM += twoD_Gaussian(ll, mm, 100, x0, y0, sigma_x, sigma_y, theta)
+    sigma_x = 0.015 * np.pi / (180.0)  # Convert to radians (the factor of 2 is to match the tigger parametrisation)
+    sigma_y = 0.015 * np.pi / (180.0)
+    x0 = 0.05 * np.pi / (180.0)
+    y0 = 0.05 * np.pi / (180.0)
+    theta = 0.0
+    IM += twoD_Gaussian(ll, mm, 50, x0, y0, sigma_x, sigma_y, theta)
+
+    IM = np.flipud(np.fliplr(IM))
+
+    # plot IM
+    plt.figure('IM true')
+    plt.imshow(IM, interpolation="nearest", cmap="cubehelix")
+    plt.colorbar()
+    plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_true" + str(Npix) + ".png", dpi=250)
+
     # Print Nyquist criteria
     deltapix = l[1] - l[0]
-    umax = uvw[:,0].max()
-    umin = uvw[:,0].min()
-    vmax = uvw[:,1].max()
-    vmin = uvw[:,1].min()
+    umax = np.abs(uvw[:,0]).max()/ref_lambda
+    umin = np.abs(uvw[:,0]).min()/ref_lambda
+    vmax = np.abs(uvw[:,1]).max()/ref_lambda
+    vmin = np.abs(uvw[:,1]).min()/ref_lambda
 
-    print "min delta pix should be ", 1.0/(2*np.maximum(umax,vmax)), " whereas you are at ", deltapix
-    print "Ndeltapix should be more than", 1/np.minimum(umin,vmin), " whereas you are at", deltapix*Npix
+    print "delta pix should be less than", 1.0/(2*np.maximum(umax,vmax)), " whereas you are at ", deltapix
+    print "Ndeltapix should be more than", 1.0/np.minimum(umin,vmin), " whereas you are at", deltapix*Npix
 
     # Set number of basis funcs
-    Nbasis = 15
+    Nbasis = 9
 
-    # # Compute the matrix that maps coefficients to visibilities
-    # Iint = np.zeros([Nrows, Nbasis**2], dtype=np.complex)
-    # H = np.zeros([Npix**2, Nbasis**2])
-    # print "Computing coeffs to vis operator mapping"
-    # for k in xrange(Nrows):
-    #     K = np.exp(-2.0j*np.pi*np.dot(uvw[k,:],lmn.T)/ref_lambda)/np.sqrt(Nrows)
-    #     if k % 1000 == 0:
-    #         print k*100/Nrows, "percent done"
-    #     for i in xrange(Nbasis):
-    #         for j in xrange(Nbasis):
-    #             H[:, i * Nbasis + j] = basis_func(lmn[:, 0], lmn[:, 1], i + 1, j + 1, L)/ncoord
-    #             Iint[k, i * Nbasis + j] = np.dot(K, H[:, i * Nbasis + j])
-    #
-    # # Show matrix rank and conditioning number
-    # print "rank = ", np.linalg.matrix_rank(Iint)
-    # print "cond = ", np.linalg.cond(Iint)
-    #
-    # # Save Iint to file so we don't have to recompute it every time
-    # print "Saving"
-    # np.savez('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz', Iint=Iint)
+    try:
+        Iint = np.load('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz')["Iint"]
+    except:
+        # Compute the matrix that maps coefficients to visibilities
+        Iint = np.zeros([Nrows, Nbasis**2], dtype=np.complex)
+        H = np.zeros([Npix**2, Nbasis**2])
+        print "Computing coeffs to vis operator mapping"
+        for k in xrange(Nrows):
+            K = np.exp(-2.0j*np.pi*np.dot(uvw[k,:],lmn.T)/ref_lambda)/np.sqrt(Nrows)
+            #K = np.exp(-2.0j * np.pi * (uvw[k, 0]*lmn[:,0] + uvw[k, 1]*lmn[:,1] + uvw[k, 1]*lmn[:,1]) / ref_lambda) / np.sqrt(Nrows)
+            if k % 1000 == 0:
+                print k*100/Nrows, "percent done"
+            for i in xrange(Nbasis):
+                for j in xrange(Nbasis):
+                    H[:, i * Nbasis + j] = basis_func(lmn[:, 0], lmn[:, 1], i + 1, j + 1, L)/ncoord
+                    Iint[k, i * Nbasis + j] = np.dot(K, H[:, i * Nbasis + j])
+                    #Iint[k, i * Nbasis + j] = np.dot(K, H[:, i * Nbasis + j])
 
-    Iint = np.load('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz')["Iint"]
+        # Show matrix rank and conditioning number
+        print "rank = ", np.linalg.matrix_rank(Iint)
+        print "cond = ", np.linalg.cond(Iint)
 
-    # # Get the dirty image and PSF
-    # Idflat = np.zeros(Npix**2)
-    # PSFflat = np.zeros(Npix**2)
-    # Onesflat = np.ones(Nrows, dtype=np.complex)
-    # for n in xrange(Npix**2):
-    #     Kinv = np.exp(2.0j*np.pi*np.dot(lmn[n, :], uvw.T))/np.sqrt(Nrows)
-    #     Idflat[n] = np.dot(Kinv, Vobs).real
-    #     PSFflat[n] = np.dot(Kinv, Onesflat).real
-    #     if n%250 == 0:
-    #         print "n = ", n
-    #
-    # # plot DFT result
-    # PSFmax = PSFflat.max()
-    # Idflat /= PSFmax
-    # plt.figure('DFT Id')
-    # plt.imshow(Idflat.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
-    # plt.colorbar()
-    # plt.savefig("/home/landman/Projects/My_Imagers/figures/ID_real" + str(Npix) + ".png", dpi=250)
-    #
-    # # plot DFT result
-    # PSFflat /= PSFmax
-    # plt.figure('DFT PSF')
-    # plt.imshow(PSFflat.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
-    # plt.colorbar()
-    # plt.savefig("/home/landman/Projects/My_Imagers/figures/PSF_real" + str(Npix) + ".png", dpi=250)
-    #
-    # np.savez("ID_and_PSF_" + str(Npix) + "pix.npz", ID=Idflat.reshape(Npix,Npix), PSF=PSFflat.reshape(Npix,Npix), PSFmax=PSFmax)
+        # Save Iint to file so we don't have to recompute it every time
+        print "Saving"
+        np.savez('/home/landman/Projects/My_Imagers/Iint' + str(Npix) + 'pix' + str(Nbasis) + 'bf.npz', Iint=Iint)
 
-    holder = np.load("ID_and_PSF_" + str(Npix) + "pix.npz")
-    PSFmax = holder["PSFmax"]
-    PSF = holder["PSF"]*PSFmax
-    #PSF = PSFflat.reshape(Npix, Npix)
-    PSFflat = PSF.flatten()
-    ID = holder["ID"]*PSFmax
-    Idflat = ID.flatten()
+    # Get the dirty image and PSF
+    try:
+        holder = np.load("ID_and_PSF_" + str(Npix) + "pix.npz")
+        PSFmax = holder["PSFmax"]
+        PSF = holder["PSF"]  # *PSFmax
+        # PSF = PSFflat.reshape(Npix, Npix)
+        PSFflat = PSF.flatten()
+        ID = holder["ID"]  # *PSFmax
+        Idflat = ID.flatten()
+    except:
+        Idflat = np.zeros(Npix**2)
+        PSFflat = np.zeros(Npix**2)
+        Onesflat = np.ones(Nrows, dtype=np.complex)
+        for n in xrange(Npix**2):
+            Kinv = np.exp(2.0j*np.pi*np.dot(lmn[n, :], uvw.T)/ref_lambda)/np.sqrt(Nrows)
+            Idflat[n] = np.dot(Kinv, Vobs).real
+            PSFflat[n] = np.dot(Kinv, Onesflat).real
+            if n%250 == 0:
+                print "n = ", n
+
+        # plot DFT result
+        PSFmax = PSFflat.max()
+        Idflat /= PSFmax
+        plt.figure('DFT Id')
+        plt.imshow(Idflat.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
+        plt.colorbar()
+        plt.savefig("/home/landman/Projects/My_Imagers/figures/ID_real" + str(Npix) + ".png", dpi=250)
+
+        # plot DFT result
+        PSFflat /= PSFmax
+        plt.figure('DFT PSF')
+        plt.imshow(PSFflat.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
+        plt.colorbar()
+        plt.savefig("/home/landman/Projects/My_Imagers/figures/PSF_real" + str(Npix) + ".png", dpi=250)
+
+        np.savez("ID_and_PSF_" + str(Npix) + "pix.npz", ID=Idflat.reshape(Npix,Npix), PSF=PSFflat.reshape(Npix,Npix), PSFmax=PSFmax)
 
 
-    #print "PSFmax = ", PSFmax
+    print "PSFmax = ", PSFmax
 
     # PSFarea1 = simps(PSF, m)
     # PSFarea2 = simps(PSFarea1, l)
@@ -197,37 +241,27 @@ if __name__=="__main__":
     #
     # test = simps(simps(PSFnorm, l), m)
 
-    #PSFsum = np.sum(PSFflat)
+    PSFsum = np.abs(np.sum(PSFflat))
 
-    #print "PSF sum = ", PSFsum
+    print "PSF sum = ", PSFsum
 
     # Do the GPR
     GPR = GP(lm, lm, L, Nbasis, 2)
 
     print "Convolving basis funcs"
     #GPR.RR_convolve_basis(PSFflat.reshape(Npix, Npix), ll, mm, L)
-    GPR.RR_convolve_basis(PSF, ll, mm, L)
+    GPR.RR_convolve_basis(PSF/PSFsum, ll, mm, L)
 
+    print "Training dirty GP"
     theta = np.array([0.01, 0.1*L, 1.0])
-
-    print "training GP"
     coeffs, theta = GPR.RR_EvalGP_conv(theta, Idflat)
 
-    print "Done"
+    print "Done. theta = ", theta
 
-    #Icoeffs = np.argwhere(coeffs < 1e-3)
-    #coeffs2 = coeffs
-    #coeffs2[Icoeffs] = 0.0
-
-    #print coeffs2.size
-
-    print theta
-
+    # Use coeffs to reconstruct initial "clean" estimate
     IdGP = GPR.RR_From_Coeffs(coeffs)
 
-    #Iltz = np.argwhere(IdGP < 0.1*IdGP.max()).squeeze()
-    #IdGP[Iltz] = 0.0
-
+    # Get the covariance matrix of the parameters
     fcovcoeffs = GPR.RR_covf_conv(theta, return_covf=False)
 
     # # Draw a sample
@@ -245,7 +279,7 @@ if __name__=="__main__":
     plt.figure('IdGP')
     plt.imshow(IdGP.reshape(Npix,Npix), interpolation="nearest", cmap="cubehelix")
     plt.colorbar()
-    plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_GP" + str(Npix) + ".png", dpi=250)
+    plt.savefig("/home/landman/Projects/My_Imagers/figures/IM_GP" + str(Npix) + 'pix' + str(Nbasis) + 'bf.png', dpi=250)
 
 
     # Map Coeffs to visibilities
@@ -258,17 +292,63 @@ if __name__=="__main__":
 
     print "Chi2 = ", Chi2imag + Chi2real
 
-    # Produce dirty image with these visibilities
-    Idpred = np.zeros(Npix**2)
-    for n in xrange(Npix**2):
-        Kinv = np.exp(2.0j*np.pi*np.dot(lmn[n, :], uvw.T))/np.sqrt(Nrows)
-        Idpred[n] = np.dot(Kinv, Vpred).real
-        if n%250 == 0:
-            print "n = ", n
+    # # Produce dirty image with these visibilities
+    # Idpred = np.zeros(Npix**2)
+    # for n in xrange(Npix**2):
+    #     Kinv = np.exp(2.0j*np.pi*np.dot(lmn[n, :], uvw.T) / ref_lambda)/np.sqrt(Nrows)
+    #     Idpred[n] = np.dot(Kinv, Vpred).real
+    #     if n%250 == 0:
+    #         print "n = ", n
+    #
+    # # Plot result
+    # Idpred /= PSFmax
+    # plt.figure('Idpred')
+    # plt.imshow(Idpred.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
+    # plt.colorbar()
+    # plt.savefig("/home/landman/Projects/My_Imagers/figures/ID_pred" + str(Npix) + ".png", dpi=250)
+
+    # Do GPR on model image
+    coeffsIM, thetaIM = GPR.RR_EvalGP(theta, IM.flatten())
+
+    IMp = GPR.RR_From_Coeffs(coeffsIM).reshape(Npix, Npix)
 
     # Plot result
-    #Idpred /= PSFmax
-    plt.figure('Idpred')
-    plt.imshow(Idpred.reshape(Npix, Npix), interpolation="nearest", cmap="cubehelix")
+    plt.figure('IMp_GP')
+    plt.imshow(IMp, interpolation="nearest", cmap="cubehelix")
     plt.colorbar()
-    plt.savefig("/home/landman/Projects/My_Imagers/figures/ID_pred" + str(Npix) + ".png", dpi=250)
+    plt.savefig("/home/landman/Projects/My_Imagers/figures/IMp_GP" + str(Npix) + 'pix' + str(Nbasis) + 'bf.png', dpi=250)
+
+    # Test PolyChord
+    nDims = coeffs.size
+    nDerived = 0
+
+    # Check if prior is adequate
+    diffcoeffs = np.abs(coeffs - coeffsIM)
+    diagcov = np.sqrt(np.diag(fcovcoeffs + 0.001*np.eye(Nbasis**2)*theta[2]))
+
+    print "Max = ", (diffcoeffs/diagcov).max(), "Mean = ", np.mean(diffcoeffs/diagcov), " Min = ", (diffcoeffs/diagcov).min()
+
+    L = np.linalg.cholesky(fcovcoeffs + 0.001*np.eye(Nbasis**2)*theta[2])
+
+    def simple_prior(cube):
+        return coeffs + np.dot(L, cube)
+
+    def simple_lik(theta):
+        phi = [0.0] * nDerived
+
+        V = np.dot(Iint, coeffs)
+        nDims = len(theta)
+
+        # get the Chi2
+        Vdiff = Vobs - V
+        Chi2real = np.sum(Vdiff.real ** 2)/2.0
+        Chi2imag = np.sum(Vdiff.imag ** 2)/2.0
+
+        logL = Chi2real + Chi2imag
+        return logL, phi
+
+
+
+    PolyChord.run_nested_sampling(simple_lik, nDims, nDerived, prior=simple_prior, num_repeats=nDims, base_dir="/home/landman/Software/PolyChord/chains")
+
+
